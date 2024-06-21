@@ -23,7 +23,7 @@ mod request_env;
 pub use request_env::*;
 
 use itertools::Itertools;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -43,7 +43,7 @@ use crate::{validation_errors::LubHelp, ValidationMode};
 use super::schema::{ValidatorActionId, ValidatorEntityType, ValidatorSchema};
 
 /// The main type structure.
-#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Serialize)]
+#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub enum Type {
     /// Bottom type. Sub-type of all types.
     Never,
@@ -768,7 +768,7 @@ impl TryFrom<Type> for cedar_policy_core::entities::SchemaType {
 /// Represents the least upper bound of multiple entity types. This can be used
 /// to represent the least upper bound of a single entity type, in which case it
 /// is exactly that entity type.
-#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Serialize)]
+#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct EntityLUB {
     // INVARIANT: Non-empty set.
     lub_elements: BTreeSet<EntityType>,
@@ -896,7 +896,7 @@ impl EntityLUB {
 
 /// Represents the attributes of a record or entity type. Each attribute has an
 /// identifier, a flag indicating weather it is required, and a type.
-#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Serialize)]
+#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct Attributes {
     /// Attributes map
     pub attrs: BTreeMap<SmolStr, AttributeType>,
@@ -1048,7 +1048,7 @@ impl IntoIterator for Attributes {
 
 /// Used to tag record types to indicate if their attributes record is open or
 /// closed.
-#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Copy, Clone, Serialize)]
+#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum OpenTag {
     /// The attributes are open. A value of this type may have attributes other
     /// than those listed.
@@ -1071,7 +1071,7 @@ impl OpenTag {
 ///
 /// The subtyping lattice for these types is that
 /// `Entity` <: `AnyEntity`. `Record` does not subtype anything.
-#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Serialize)]
+#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub enum EntityRecordKind {
     /// A record type, with these attributes
     Record {
@@ -1351,7 +1351,7 @@ impl EntityRecordKind {
 }
 
 /// Contains the type of a record attribute and if the attribute is required.
-#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Serialize)]
+#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AttributeType {
     /// The type of the attribute.
@@ -1380,7 +1380,7 @@ impl AttributeType {
 }
 
 /// Represent the possible primitive types.
-#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Serialize)]
+#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub enum Primitive {
     /// Primitive boolean type.
     Bool,
