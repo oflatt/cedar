@@ -25,6 +25,7 @@ extern crate lalrpop_util;
 pub mod ast;
 pub mod authorizer;
 mod from_normalized_str;
+mod entity_slicing;
 pub use from_normalized_str::*;
 pub mod entities;
 #[macro_use]
