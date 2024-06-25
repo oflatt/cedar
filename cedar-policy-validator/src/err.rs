@@ -17,7 +17,6 @@
 use cedar_policy_core::{ast::EntityUID, transitive_closure};
 use miette::Diagnostic;
 use thiserror::Error;
-
 use crate::human_schema;
 
 /// Error creating a schema from human syntax
