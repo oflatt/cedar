@@ -89,6 +89,8 @@ pub enum Commands {
     Evaluate(EvaluateArgs),
     /// Validate a policy set against a schema
     Validate(ValidateArgs),
+    /// Compute the entity manifest for a schema and policy set
+    EntityManifest(EntityManifestArgs),
     /// Check that policies successfully parse
     CheckParse(CheckParseArgs),
     /// Link a template
@@ -163,6 +165,19 @@ pub enum ValidationMode {
     Permissive,
     /// Partial validation
     Partial,
+}
+
+#[derive(Args, Debug)]
+pub struct EntityManifestArgs {
+    /// File containing the schema
+    #[arg(short, long = "schema", value_name = "FILE")]
+    pub schema_file: String,
+    /// Policies args (incorporated by reference)
+    #[command(flatten)]
+    pub policies: PoliciesArgs,
+    /// Schema format (Human-readable or JSON)
+    #[arg(long, value_enum, default_value_t = SchemaFormat::Human)]
+    pub schema_format: SchemaFormat,
 }
 
 #[derive(Args, Debug)]
@@ -534,6 +549,27 @@ pub fn check_parse(args: &CheckParseArgs) -> CedarExitCode {
             CedarExitCode::Failure
         }
     }
+}
+
+pub fn entity_manifest(args: &EntityManifestArgs) -> CedarExitCode {
+    let pset = match args.policies.get_policy_set() {
+        Ok(pset) => pset,
+        Err(e) => {
+            println!("{e:?}");
+            return CedarExitCode::Failure;
+        }
+    };
+
+    let schema = match read_schema_file(&args.schema_file, args.schema_format) {
+        Ok(schema) => schema,
+        Err(e) => {
+            println!("{e:?}");
+            return CedarExitCode::Failure;
+        }
+    };
+
+    compute_entity_manifest(&schema, &pset);
+    CedarExitCode::Success
 }
 
 pub fn validate(args: &ValidateArgs) -> CedarExitCode {

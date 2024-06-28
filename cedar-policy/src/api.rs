@@ -23,6 +23,7 @@
 )]
 
 mod id;
+use cedar_policy_validator::entity_slicing::{compute_entity_slice_manifest, EntitySliceManifest};
 pub use id::*;
 
 mod err;
@@ -3555,4 +3556,11 @@ pub fn eval_expression(
         // Evaluate under the empty slot map, as an expression should not have slots
         eval.interpret(&expr.0, &ast::SlotEnv::new())?,
     ))
+}
+
+/// Given a schema and policy set, compute an entity slice manifest.
+/// The manifest describes the data required to answer requests
+/// for each action type.
+pub fn compute_entity_manifest(schema: &Schema, pset: &PolicySet) -> EntitySliceManifest {
+    compute_entity_slice_manifest(&schema.0, &pset.ast)
 }
