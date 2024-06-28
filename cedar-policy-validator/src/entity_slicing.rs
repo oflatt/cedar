@@ -1,8 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
-use cedar_policy_core::{ast::PolicyID, authorizer::PartialResponse};
+use cedar_policy_core::{
+    ast::{Expr, ExprKind, PolicyID},
+    authorizer::PartialResponse,
+};
 
-use crate::{typecheck::Typechecker, SchemaFragment, ValidationMode};
+use crate::{
+    typecheck::{TypecheckAnswer, Typechecker}, types::Type, SchemaFragment, ValidationMode
+};
 
 enum EntitiesNeeded {
     All,
@@ -24,16 +29,24 @@ fn residual_entities_needed(
     schema: SchemaFragment,
     residual: &PartialResponse,
 ) -> EntitiesNeededPerType {
+    let into_schema = schema.try_into().expect("failed to construct schema.");
     let typechecker = Typechecker::new(
-        &schema.try_into().expect("failed to construct schema."),
+        &into_schema,
         ValidationMode::Strict,
         // TODO is this correct?
         PolicyID::from_string("0"),
     );
     let residuals = residual.all_residuals();
     let mut res = EntitiesNeededPerType::default();
+
     for residual in residuals {
-        res = res.union(&expr_entities_needed(&residual.condition()));
+        let mut errors = HashSet::new();
+        let TypecheckAnswer::TypecheckSuccess { expr_type, .. } =
+            typechecker.typecheck_expr(&residual.condition(), &mut errors)
+        else {
+            panic!("Failed to type check {}", residual.condition());
+        };
+        res = res.union(&expr_entities_needed(&expr_type));
     }
     res
 }
@@ -41,7 +54,7 @@ fn residual_entities_needed(
 // given an expression, attempt to break it
 // into a conjunct of multiple expressions
 // by finding `And` operations
-fn get_conjunct(expr: &Expr) -> Vec<Expr> {
+fn get_conjunct(expr: &Expr<Option<Type>>) -> Vec<Expr<Option<Type>>> {
     match expr.expr_kind() {
         ExprKind::And { left, right } => {
             let mut res = get_conjunct(left);
@@ -54,13 +67,14 @@ fn get_conjunct(expr: &Expr) -> Vec<Expr> {
     }
 }
 
-fn expr_entities_needed(expr: &Expr) -> EntitiesNeededPerType {
+fn expr_entities_needed(expr: &Expr<Option<Type>>) -> EntitiesNeededPerType {
     // TODO use this to look for equalities
     let _conjunct = get_conjunct(expr);
-
     match expr.expr_kind() {
         ExprKind::Lit(_) => EntitiesNeededPerType::default(),
-        ExprKind::Var(_) => {}
+        ExprKind::Var(v) => {
+            expr.data
+        }
         ExprKind::Slot(_) => todo!(),
         ExprKind::Unknown(_) => todo!(),
         ExprKind::If {
