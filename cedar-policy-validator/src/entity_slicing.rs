@@ -2,21 +2,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use cedar_policy_core::{
-    ast::{
-        EntityType, EntityUID, Expr, ExprKind, Policy, PolicyID, PolicySet, Var, ACTION_ENTITY_TYPE,
-    },
-    authorizer::PartialResponse,
-};
+use cedar_policy_core::ast::{
+        EntityUID, Expr, ExprKind, Policy, PolicySet, Var,
+    };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use smol_str::SmolStr;
 
-use crate::{
-    typecheck::{TypecheckAnswer, Typechecker},
-    types::Type,
-    SchemaFragment, ValidationMode, ValidatorActionId, ValidatorSchema,
-};
+use crate::ValidatorSchema;
 
 type PerAction = HashMap<EntityUID, PrimarySlice>;
 
@@ -112,6 +105,12 @@ impl PrimarySlice {
     }
 }
 
+impl Default for PrimarySlice {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EntitySlice {
     fn union(&self, other: &Self) -> Self {
         EntitySlice {
@@ -161,7 +160,7 @@ fn add_policy_to_manifest(manifest: &mut PerAction, policy: &Policy) {
         }
         cedar_policy_core::ast::ActionConstraint::In(actions) => {
             for action in actions {
-                if let Some(existing) = manifest.get(&*action) {
+                if let Some(existing) = manifest.get(action) {
                     manifest.insert((**action).clone(), existing.union(&primary_slice));
                 } else {
                     manifest.insert((**action).clone(), primary_slice.clone());
@@ -169,7 +168,7 @@ fn add_policy_to_manifest(manifest: &mut PerAction, policy: &Policy) {
             }
         }
         cedar_policy_core::ast::ActionConstraint::Eq(action) => {
-            if let Some(existing) = manifest.get(&*action) {
+            if let Some(existing) = manifest.get(action) {
                 manifest.insert((**action).clone(), existing.union(&primary_slice));
             } else {
                 manifest.insert((**action).clone(), primary_slice.clone());
