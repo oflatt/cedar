@@ -568,7 +568,11 @@ pub fn entity_manifest(args: &EntityManifestArgs) -> CedarExitCode {
         }
     };
 
-    compute_entity_manifest(&schema, &pset);
+    println!(
+        "Entity manifest: {}",
+        serde_json::to_string_pretty(&compute_entity_manifest(&schema, &pset)).unwrap()
+    );
+
     CedarExitCode::Success
 }
 
