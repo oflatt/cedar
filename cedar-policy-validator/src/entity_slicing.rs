@@ -3,8 +3,8 @@
 use std::collections::{HashMap, HashSet};
 
 use cedar_policy_core::ast::{
-        EntityUID, Expr, ExprKind, Policy, PolicySet, Var,
-    };
+    BinaryOp, EntityUID, Expr, ExprKind, Policy, PolicySet, UnaryOp, Var,
+};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use smol_str::SmolStr;
@@ -61,13 +61,19 @@ pub enum Constraint {}
 /// An entity slice- tells users a tree of data to load
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct EntitySlice {
-    /// Constraints allow us to load part of the data.
-    /// e.g. for a set, we could load only some elements
-    constraints: HashSet<Constraint>,
-    /// Child data of this entity slice.
-    #[serde_as(as = "Vec<(_, _)>")]
-    children: Fields,
+pub enum EntitySlice {
+    /// Pull all fields of this entity or struct recursively.
+    /// No need to fetch any entities referenced, through.
+    All,
+    /// Pull the specified fields of this entity or struct.
+    Some {
+        /// Constraints allow us to load part of the data.
+        /// e.g. for a set, we could load only some elements
+        constraints: HashSet<Constraint>,
+        /// Child data of this entity slice.
+        #[serde_as(as = "Vec<(_, _)>")]
+        children: Fields,
+    },
 }
 
 fn union_fields(first: &Fields, second: &Fields) -> Fields {
@@ -113,13 +119,21 @@ impl Default for PrimarySlice {
 
 impl EntitySlice {
     fn union(&self, other: &Self) -> Self {
-        EntitySlice {
-            constraints: self
-                .constraints
-                .union(&other.constraints)
-                .cloned()
-                .collect(),
-            children: union_fields(&self.children, &other.children),
+        match (self, other) {
+            (Self::All, _) | (_, Self::All) => Self::All,
+            (
+                EntitySlice::Some {
+                    constraints: left,
+                    children: cleft,
+                },
+                EntitySlice::Some {
+                    constraints: right,
+                    children: cright,
+                },
+            ) => EntitySlice::Some {
+                constraints: left.union(right).cloned().collect(),
+                children: union_fields(cleft, cright),
+            },
         }
     }
 }
@@ -179,11 +193,11 @@ fn add_policy_to_manifest(manifest: &mut PerAction, policy: &Policy) {
 
 fn compute_primary_slice(policy: &Policy) -> PrimarySlice {
     let mut primary_slice = PrimarySlice::new();
-    add_to_primary_slice(&mut primary_slice, &policy.condition());
+    add_to_primary_slice(&mut primary_slice, &policy.condition(), false);
     primary_slice
 }
 
-fn add_to_primary_slice(primary_slice: &mut PrimarySlice, expr: &Expr) {
+fn add_to_primary_slice(primary_slice: &mut PrimarySlice, expr: &Expr, should_pull_all: bool) {
     match expr.expr_kind() {
         ExprKind::Lit(_) => (),
         ExprKind::Var(_) => (),
@@ -196,49 +210,66 @@ fn add_to_primary_slice(primary_slice: &mut PrimarySlice, expr: &Expr) {
             then_expr,
             else_expr,
         } => {
-            add_to_primary_slice(primary_slice, test_expr);
-            add_to_primary_slice(primary_slice, then_expr);
-            add_to_primary_slice(primary_slice, else_expr);
+            add_to_primary_slice(primary_slice, test_expr, should_pull_all);
+            add_to_primary_slice(primary_slice, then_expr, should_pull_all);
+            add_to_primary_slice(primary_slice, else_expr, should_pull_all);
         }
         ExprKind::And { left, right } => {
-            add_to_primary_slice(primary_slice, left);
-            add_to_primary_slice(primary_slice, right);
+            add_to_primary_slice(primary_slice, left, should_pull_all);
+            add_to_primary_slice(primary_slice, right, should_pull_all);
         }
         ExprKind::Or { left, right } => {
-            add_to_primary_slice(primary_slice, left);
-            add_to_primary_slice(primary_slice, right);
+            add_to_primary_slice(primary_slice, left, should_pull_all);
+            add_to_primary_slice(primary_slice, right, should_pull_all);
         }
-        ExprKind::UnaryApp { op, arg } => {
-            add_to_primary_slice(primary_slice, arg);
-        }
-        // TODO this is not sound for equality checks between structs
-        // we need to fix to load in everything for these
-        ExprKind::BinaryApp { op, arg1, arg2 } => {
-            add_to_primary_slice(primary_slice, arg1);
-            add_to_primary_slice(primary_slice, arg2);
-        }
+        // For unary and binary operations, we need to be careful
+        // to remain sound.
+        // For example, equality requires that we pull all data
+        ExprKind::UnaryApp { op, arg } => match op {
+            UnaryOp::Not => add_to_primary_slice(primary_slice, arg, should_pull_all),
+            UnaryOp::Neg => add_to_primary_slice(primary_slice, arg, should_pull_all),
+        },
+        ExprKind::BinaryApp { op, arg1, arg2 } => match op {
+            BinaryOp::Eq => {
+                add_to_primary_slice(primary_slice, arg1, true);
+                add_to_primary_slice(primary_slice, arg2, true);
+            }
+            BinaryOp::Less
+            | BinaryOp::LessEq
+            | BinaryOp::Add
+            | BinaryOp::Sub
+            | BinaryOp::Mul
+            | BinaryOp::In
+            | BinaryOp::Contains
+            | BinaryOp::ContainsAll
+            | BinaryOp::ContainsAny => {
+                add_to_primary_slice(primary_slice, arg1, should_pull_all);
+                add_to_primary_slice(primary_slice, arg2, should_pull_all);
+            }
+        },
         ExprKind::ExtensionFunctionApp { fn_name, args } => {
             panic!("Extension functions not supported by entity manifest")
         }
         ExprKind::Like { expr, pattern } => {
-            add_to_primary_slice(primary_slice, expr);
+            add_to_primary_slice(primary_slice, expr, should_pull_all);
         }
         ExprKind::Is { expr, entity_type } => {
-            add_to_primary_slice(primary_slice, expr);
+            // TODO what are the semantics of is? Does this work?
+            add_to_primary_slice(primary_slice, expr, should_pull_all);
         }
         ExprKind::Set(contents) => {
             for expr in &**contents {
-                add_to_primary_slice(primary_slice, &expr);
+                add_to_primary_slice(primary_slice, &expr, should_pull_all);
             }
         }
         ExprKind::Record(content) => {
             for expr in content.values() {
-                add_to_primary_slice(primary_slice, &expr);
+                add_to_primary_slice(primary_slice, &expr, should_pull_all);
             }
         }
         ExprKind::GetAttr { .. } | ExprKind::HasAttr { .. } => {
             let (base, path) = get_expr_path(expr);
-            let slice = path_to_field(path);
+            let slice = path_to_field(path, should_pull_all);
 
             match base {
                 Var::Principal => {
@@ -260,13 +291,21 @@ fn add_to_primary_slice(primary_slice: &mut PrimarySlice, expr: &Expr) {
     }
 }
 
-fn path_to_field(path: Vec<SmolStr>) -> Fields {
+/// Given a path of fields to access, convert to a tree
+/// (the [`Fields`] data structure.
+/// Also, when we need to pull all the data for the final field
+/// do so.
+fn path_to_field(path: Vec<SmolStr>, should_pull_all: bool) -> Fields {
     let mut current = HashMap::new();
     // reverse the path, visiting the last access first
-    for field in path.iter().rev() {
-        let slice = EntitySlice {
-            children: current,
-            constraints: HashSet::new(),
+    for (i, field) in path.iter().rev().enumerate() {
+        let slice = if (i == 0) && should_pull_all {
+            EntitySlice::All
+        } else {
+            EntitySlice::Some {
+                children: current,
+                constraints: HashSet::new(),
+            }
         };
         current = HashMap::new();
         current.insert(DataField::Field(field.clone()), Box::new(slice));
