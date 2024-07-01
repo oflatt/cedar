@@ -52,7 +52,10 @@ pub struct PrimarySlice {
     /// the fields of the context entity needed
     #[serde_as(as = "Vec<(_, _)>")]
     context_slice: Fields,
+    // TODO: in cedar you can start from an entity literal, which you need to load
 }
+
+
 
 /// Constraints on entity slices
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -64,6 +67,8 @@ pub enum Constraint {}
 pub enum EntitySlice {
     /// Pull all fields of this entity or struct recursively.
     /// No need to fetch any entities referenced, through.
+    /// This corresponds to "one level" of data, i.e. no chasing entity
+    /// pointers.
     All,
     /// Pull the specified fields of this entity or struct.
     Some {
@@ -326,6 +331,7 @@ fn get_expr_path(expr: &Expr) -> (Var, Vec<SmolStr>) {
             path.push(attr.clone());
             (base, path)
         }
+        // TODO: Handle case of literal struct, then getattr or has attr
         _ => panic!(
             "Tried to use GetAttr or HasAttr on an expression with operation {:?}",
             expr.expr_kind()
