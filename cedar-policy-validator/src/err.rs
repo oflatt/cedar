@@ -20,6 +20,7 @@ use cedar_policy_core::{
 };
 use miette::Diagnostic;
 use thiserror::Error;
+
 use crate::human_schema;
 
 /// Error creating a schema from human syntax
