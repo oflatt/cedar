@@ -24,6 +24,7 @@
 
 mod id;
 use cedar_policy_validator::entity_slicing;
+#[cfg(feature = "entity-manifest")]
 pub use cedar_policy_validator::entity_slicing::{
     AccessTrie, EntityManifest, EntityRoot, EntitySliceError, Fields, RootAccessTrie,
 };
@@ -3628,6 +3629,7 @@ pub fn eval_expression(
 /// The manifest describes the data required to answer requests
 /// for each action type.
 #[doc = include_str!("../experimental_warning.md")]
+#[cfg(feature = "entity-manifest")]
 pub fn compute_entity_manifest(
     schema: &Schema,
     pset: &PolicySet,
