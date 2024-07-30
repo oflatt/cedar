@@ -3623,6 +3623,8 @@ pub fn eval_expression(
 }
 
 /// Given a schema and policy set, compute an entity slice manifest.
+/// The policies must validate against the schema in strict mode,
+/// otherwise an error is returned.
 /// The manifest describes the data required to answer requests
 /// for each action type.
 pub fn compute_entity_manifest(
