@@ -621,7 +621,14 @@ fn get_expr_path(
 
 #[cfg(test)]
 mod entity_slice_tests {
-    use cedar_policy_core::{ast::PolicyID, extensions::Extensions, parser::parse_policy};
+    use cedar_policy_core::{
+        ast::{Context, PolicyID, Request},
+        entities::{EntityJsonParser, TCComputation},
+        extensions::Extensions,
+        parser::parse_policy,
+    };
+
+    use crate::CoreSchema;
 
     use super::*;
 
@@ -644,6 +651,60 @@ action Read appliesTo {
         )
         .unwrap()
         .0
+    }
+
+    fn expect_entity_slice_to(
+        original: serde_json::Value,
+        expected: serde_json::Value,
+        schema: &ValidatorSchema,
+        manifest: &EntityManifest,
+    ) {
+        let request = Request::new(
+            (
+                EntityUID::with_eid_and_type("User", "oliver").unwrap(),
+                None,
+            ),
+            (
+                EntityUID::with_eid_and_type("Action", "Read").unwrap(),
+                None,
+            ),
+            (
+                EntityUID::with_eid_and_type("Document", "dummy").unwrap(),
+                None,
+            ),
+            Context::empty(),
+            Some(schema),
+            Extensions::all_available(),
+        )
+        .unwrap();
+
+        let schema = CoreSchema::new(schema);
+        let parser: EntityJsonParser<'_, '_, CoreSchema<'_>> = EntityJsonParser::new(
+            Some(&schema),
+            Extensions::all_available(),
+            TCComputation::AssumeAlreadyComputed,
+        );
+        let original_entities = parser.from_json_value(original).unwrap();
+
+        // Entity slicing results in invalid entity stores
+        // since attributes may be missing.
+        let parser_without_validation: EntityJsonParser<'_, '_> = EntityJsonParser::new(
+            None,
+            Extensions::all_available(),
+            TCComputation::AssumeAlreadyComputed,
+        );
+        let expected_entities = parser_without_validation.from_json_value(expected).unwrap();
+
+        let sliced_entities = manifest.slice(&original_entities, &request).unwrap();
+
+        #[allow(clippy::panic)]
+        if !sliced_entities.deep_eq(&expected_entities) {
+            panic!(
+                "Sliced entities differed from expected. Expected:\n{}\nGot:\n{}",
+                expected_entities.to_json_value().unwrap(),
+                sliced_entities.to_json_value().unwrap()
+            );
+        }
     }
 
     #[test]
@@ -700,6 +761,137 @@ when {
 }"#;
         let expected_manifest = serde_json::from_str(expected).unwrap();
         assert_eq!(entity_manifest, expected_manifest);
+
+        let entities_json = serde_json::json!(
+            [
+                {
+                    "uid" : { "type" : "User", "id" : "oliver"},
+                    "attrs" : {
+                        "name" : "Oliver"
+                    },
+                    "parents" : []
+                },
+                {
+                    "uid" : { "type" : "User", "id" : "oliver2"},
+                    "attrs" : {
+                        "name" : "Oliver2"
+                    },
+                    "parents" : []
+                },
+            ]
+        );
+
+        let expected_entities_json = serde_json::json!(
+            [
+                {
+                    "uid" : { "type" : "User", "id" : "oliver"},
+                    "attrs" : {
+                        "name" : "Oliver"
+                    },
+                    "parents" : []
+                },
+            ]
+        );
+
+        expect_entity_slice_to(
+            entities_json,
+            expected_entities_json,
+            &schema,
+            &expected_manifest,
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn sanity_test_empty_entity_manifest() {
+        let mut pset = PolicySet::new();
+        let policy =
+            parse_policy(None, "permit(principal, action, resource);").expect("should succeed");
+        pset.add(policy.into()).expect("should succeed");
+
+        let schema = ValidatorSchema::from_str_natural(
+            "
+entity User = {
+  name: String,
+};
+
+entity Document;
+
+action Read appliesTo {
+  principal: [User],
+  resource: [Document]
+};
+        ",
+            Extensions::all_available(),
+        )
+        .unwrap()
+        .0;
+
+        let entity_manifest = compute_entity_manifest(&schema, &pset).expect("Should succeed");
+        let expected = r#"
+{
+  "per_action": [
+    [
+      {
+        "principal": "User",
+        "action": {
+          "ty": "Action",
+          "eid": "Read"
+        },
+        "resource": "Document"
+      },
+      {
+        "trie": [
+        ]
+      }
+    ]
+  ]
+}"#;
+        let expected_manifest = serde_json::from_str(expected).unwrap();
+        assert_eq!(entity_manifest, expected_manifest);
+
+        let entities_json = serde_json::json!(
+            [
+                {
+                    "uid" : { "type" : "User", "id" : "oliver"},
+                    "attrs" : {
+                        "name" : "Oliver"
+                    },
+                    "parents" : []
+                },
+                {
+                    "uid" : { "type" : "User", "id" : "oliver2"},
+                    "attrs" : {
+                        "name" : "Oliver2"
+                    },
+                    "parents" : []
+                },
+            ]
+        );
+
+        let expected_entities_json = serde_json::json!([
+            {
+                "uid" : { "type" : "User", "id" : "oliver"},
+                "attrs" : {
+                    "name" : "Oliver"
+                },
+                "parents" : []
+            },
+            {
+                "uid" : { "type" : "User", "id" : "oliver2"},
+                "attrs" : {
+                    "name" : "Oliver2"
+                },
+                "parents" : []
+            },
+        ]);
+
+        expect_entity_slice_to(
+            entities_json,
+            expected_entities_json,
+            &schema,
+            &expected_manifest,
+        );
     }
 
     #[test]
@@ -733,6 +925,34 @@ when {
 }"#;
         let expected_manifest = serde_json::from_str(expected).unwrap();
         assert_eq!(entity_manifest, expected_manifest);
+
+        let entities_json = serde_json::json!(
+            [
+                {
+                    "uid" : { "type" : "User", "id" : "oliver"},
+                    "attrs" : {
+                        "name" : "Oliver"
+                    },
+                    "parents" : []
+                },
+                {
+                    "uid" : { "type" : "User", "id" : "oliver2"},
+                    "attrs" : {
+                        "name" : "Oliver2"
+                    },
+                    "parents" : []
+                },
+            ]
+        );
+
+        let expected_entities_json = serde_json::json!([]);
+
+        expect_entity_slice_to(
+            entities_json,
+            expected_entities_json,
+            &schema,
+            &expected_manifest,
+        );
     }
 
     #[test]
@@ -804,6 +1024,60 @@ action Read appliesTo {
 }"#;
         let expected_manifest = serde_json::from_str(expected).unwrap();
         assert_eq!(entity_manifest, expected_manifest);
+
+        let entities_json = serde_json::json!(
+            [
+                {
+                    "uid" : { "type" : "User", "id" : "oliver"},
+                    "attrs" : {
+                        "name" : "Oliver",
+                        "manager": { "type" : "User", "id" : "george"}
+                    },
+                    "parents" : [
+                        { "type" : "Document", "id" : "oliverdocument"}
+                    ]
+                },
+                {
+                    "uid" : { "type" : "User", "id" : "george"},
+                    "attrs" : {
+                        "name" : "George",
+                        "manager": { "type" : "User", "id" : "george"}
+                    },
+                    "parents" : [
+                        { "type" : "Document", "id" : "georgedocument"}
+                    ]
+                },
+            ]
+        );
+
+        let expected_entities_json = serde_json::json!(
+            [
+                {
+                    "uid" : { "type" : "User", "id" : "oliver"},
+                    "attrs" : {
+                        "manager": { "__entity": { "type" : "User", "id" : "george"} }
+                    },
+                    "parents" : [
+                        { "type" : "Document", "id" : "oliverdocument"}
+                    ]
+                },
+                {
+                    "uid" : { "type" : "User", "id" : "george"},
+                    "attrs" : {
+                    },
+                    "parents" : [
+                        { "type" : "Document", "id" : "georgedocument"}
+                    ]
+                },
+            ]
+        );
+
+        expect_entity_slice_to(
+            entities_json,
+            expected_entities_json,
+            &schema,
+            &expected_manifest,
+        );
     }
 
     #[test]
@@ -1025,6 +1299,68 @@ action Read appliesTo {
 }"#;
         let expected_manifest = serde_json::from_str(expected).unwrap();
         assert_eq!(entity_manifest, expected_manifest);
+
+        let entities_json = serde_json::json!(
+            [
+                {
+                    "uid" : { "type" : "User", "id" : "oliver"},
+                    "attrs" : {
+                    },
+                    "parents" : [
+                    ]
+                },
+                {
+                    "uid": { "type": "Document", "id": "dummy"},
+                    "attrs": {
+                        "metadata": { "type": "Metadata", "id": "olivermetadata"},
+                        "readers": [{"type": "User", "id": "oliver"}]
+                    },
+                    "parents": [],
+                },
+                {
+                    "uid": { "type": "Metadata", "id": "olivermetadata"},
+                    "attrs": {
+                        "owner": { "type": "User", "id": "oliver"},
+                        "time": "now"
+                    },
+                    "parents": [],
+                },
+            ]
+        );
+
+        let expected_entities_json = serde_json::json!(
+            [
+                {
+                    "uid": { "type": "Document", "id": "dummy"},
+                    "attrs": {
+                        "metadata": {"__entity": { "type": "Metadata", "id": "olivermetadata"}},
+                        "readers": [{ "__entity": {"type": "User", "id": "oliver"}}]
+                    },
+                    "parents": [],
+                },
+                {
+                    "uid": { "type": "Metadata", "id": "olivermetadata"},
+                    "attrs": {
+                        "owner": {"__entity": { "type": "User", "id": "oliver"}},
+                    },
+                    "parents": [],
+                },
+                {
+                    "uid" : { "type" : "User", "id" : "oliver"},
+                    "attrs" : {
+                    },
+                    "parents" : [
+                    ]
+                },
+            ]
+        );
+
+        expect_entity_slice_to(
+            entities_json,
+            expected_entities_json,
+            &schema,
+            &expected_manifest,
+        );
     }
 
     #[test]
