@@ -36,6 +36,7 @@ use serde::Serialize;
 use std::collections::HashSet;
 
 pub mod entity_manifest;
+pub mod entity_slicing;
 mod err;
 pub use err::*;
 mod coreschema;
