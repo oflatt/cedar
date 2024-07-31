@@ -137,6 +137,7 @@ impl<T: Clone> AccessTrie<T> {
         let Dereference::Data(entity) = entities.entity(lit) else {
             return Ok(());
         };
+
         let mut new_entity = HashMap::<SmolStr, PartialValue>::new();
         for (field, slice) in &self.children {
             // only slice when field is available
@@ -172,6 +173,8 @@ impl<T: Clone> AccessTrie<T> {
         Ok(())
     }
 
+    /// Given an entity store and particular value:
+    /// return a sliced value and slice any entities it relies on.
     fn slice_val(
         &self,
         entities: &Entities,
