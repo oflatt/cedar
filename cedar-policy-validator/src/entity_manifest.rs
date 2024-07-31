@@ -803,7 +803,7 @@ when {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "Sliced entities differed")]
     fn sanity_test_empty_entity_manifest() {
         let mut pset = PolicySet::new();
         let policy =
