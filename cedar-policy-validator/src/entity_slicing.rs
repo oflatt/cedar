@@ -107,19 +107,20 @@ impl<T: Clone> RootAccessTrie<T> {
                         let PartialValue::Value(val) = partial_val else {
                             return Err(EntitySliceError::PartialRequestError);
                         };
-                        slice.slice_val(entities, &val, &mut res);
+                        slice.slice_val(entities, &val, &mut res)?;
                     }
                 }
             }
         }
         // PANIC SAFETY: All entity ids are unique because res is a map.
+        #[allow(clippy::expect_used)]
         Ok(Entities::from_entities(
             res.into_values(),
             None::<&NoEntitiesSchema>,
             TCComputation::AssumeAlreadyComputed,
             Extensions::all_available(),
         )
-        .unwrap())
+        .expect("Entities construction should succeed during slicing"))
     }
 }
 
