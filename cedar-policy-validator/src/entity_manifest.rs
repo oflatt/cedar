@@ -697,6 +697,7 @@ action Read appliesTo {
 
         let sliced_entities = manifest.slice(&original_entities, &request).unwrap();
 
+        // PANIC SAFETY: Test panics when result is incorrect.
         #[allow(clippy::panic)]
         if !sliced_entities.deep_eq(&expected_entities) {
             panic!(

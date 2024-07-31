@@ -159,10 +159,10 @@ impl<T: Clone> AccessTrie<T> {
         let new_entity =
             Entity::new_with_attr_partial_value(lit.clone(), new_entity, new_ancestors);
 
+        // PANIC SAFETY: Entities in the entity store with the same ID should be compatible to union together.
         #[allow(clippy::expect_used)]
         if let Some(existing) = res.get_mut(lit) {
             // Here we union the new entity with any existing one
-            // PANIC SAFETY: Entities in the entity store with the same ID should be compatible to union together.
             *existing = existing
                 .union(&new_entity)
                 .expect("Incompatible values found in entity store");
