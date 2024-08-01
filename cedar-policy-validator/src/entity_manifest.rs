@@ -193,7 +193,7 @@ impl Diagnostic for PartialExpressionError {}
 /// Error when the request is partial during entity
 /// manifest computation
 #[derive(Debug, Clone, Error, Hash, Eq, PartialEq)]
-#[error("Entity manifest computation requires a fully concrete request. Got a partial request.")]
+#[error("Entity manifest computation and entity slicing require a fully concrete request. Got a partial request.")]
 pub struct PartialRequestError {}
 impl Diagnostic for PartialRequestError {}
 
