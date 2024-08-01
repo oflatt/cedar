@@ -31,6 +31,7 @@ use serde_with::serde_as;
 use smol_str::SmolStr;
 use thiserror::Error;
 
+use crate::entity_manifest_analysis::EntityManifestAnalysisResult;
 use crate::ValidationError;
 use crate::{
     typecheck::{PolicyCheck, Typechecker},
@@ -130,8 +131,8 @@ pub struct AccessTrie<T = ()> {
 
 /// A data path that may end with requesting the parents of
 /// an entity.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AccessPath {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct AccessPath {
     /// The root variable that begins the data path
     pub root: EntityRoot,
     /// The path of fields of entities or structs
@@ -242,7 +243,7 @@ fn union_fields<T: Clone>(first: &Fields<T>, second: &Fields<T>) -> Fields<T> {
 
 impl AccessPath {
     /// Convert a [`AccessPath`] into corresponding [`RootAccessTrie`].
-    fn to_root_access_trie(&self) -> RootAccessTrie {
+    pub fn to_root_access_trie(&self) -> RootAccessTrie {
         self.to_root_access_trie_with_leaf(AccessTrie {
             ancestors_required: true,
             children: Default::default(),
@@ -252,7 +253,7 @@ impl AccessPath {
 
     /// Convert an [`AccessPath`] to a [`RootAccessTrie`], and also
     /// add a full trie as the leaf at the end.
-    fn to_root_access_trie_with_leaf(&self, leaf_trie: AccessTrie) -> RootAccessTrie {
+    pub(crate) fn to_root_access_trie_with_leaf(&self, leaf_trie: AccessTrie) -> RootAccessTrie {
         let mut current = leaf_trie;
         // reverse the path, visiting the last access first
         for field in self.path.iter().rev() {
@@ -283,7 +284,7 @@ impl RootAccessTrie {
 impl<T: Clone> RootAccessTrie<T> {
     /// Union two [`RootAccessTrie`]s together.
     /// The new trie requests the data from both of the original.
-    fn union(&self, other: &Self) -> Self {
+    pub fn union(&self, other: &Self) -> Self {
         let mut res = self.clone();
         for (key, value) in &other.trie {
             res.trie
@@ -304,7 +305,7 @@ impl Default for RootAccessTrie {
 impl<T: Clone> AccessTrie<T> {
     /// Union two [`AccessTrie`]s together.
     /// The new trie requests the data from both of the original.
-    fn union(&self, other: &Self) -> Self {
+    pub fn union(&self, other: &Self) -> Self {
         Self {
             children: union_fields(&self.children, &other.children),
             ancestors_required: self.ancestors_required || other.ancestors_required,
@@ -315,7 +316,7 @@ impl<T: Clone> AccessTrie<T> {
 
 impl AccessTrie {
     /// A new trie that requests no data.
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             children: Default::default(),
             ancestors_required: false,
@@ -343,7 +344,8 @@ pub fn compute_entity_manifest(
                 PolicyCheck::Success(typechecked_expr) => {
                     // compute the trie from the typechecked expr
                     // using static analysis
-                    compute_root_trie(&typechecked_expr, policy.id())
+                    entity_manifest_from_expr(&typechecked_expr, policy.id())
+                        .map(|val| val.global_trie)
                 }
                 PolicyCheck::Irrelevant(_) => {
                     // this policy is irrelevant, so we need no data
@@ -385,66 +387,80 @@ pub fn compute_entity_manifest(
 /// A static analysis on type-annotated cedar expressions.
 /// Computes the [`RootAccessTrie`] representing all the data required
 /// to evaluate the expression.
-fn compute_root_trie(
+fn entity_manifest_from_expr(
     expr: &Expr<Option<Type>>,
     policy_id: &PolicyID,
-) -> Result<RootAccessTrie, EntityManifestError> {
-    let mut primary_slice = RootAccessTrie::new();
-    add_to_root_trie(&mut primary_slice, expr, policy_id, false)?;
-    Ok(primary_slice)
-}
-
-/// Add the expression's requested data to the [`RootAccessTrie`].
-/// This handles <expr>s from the grammar (see [`FailedAnalysisError`])
-/// while [`get_expr_path`] handles the <datapath-expr>s.
-fn add_to_root_trie(
-    root_trie: &mut RootAccessTrie,
-    expr: &Expr<Option<Type>>,
-    policy_id: &PolicyID,
-    should_load_all: bool,
-) -> Result<(), EntityManifestError> {
+) -> Result<EntityManifestAnalysisResult, EntityManifestError> {
     match expr.expr_kind() {
-        // Literals, variables, and unkonwns without any GetAttr operations
-        // on them are okay, since no fields need to be loaded.
-        ExprKind::Lit(_) => Ok(()),
-        ExprKind::Var(_) => Ok(()),
-        ExprKind::Slot(_) => Ok(()),
+        ExprKind::Slot(slot_id) => {
+            if slot_id.is_principal() {
+                Ok(EntityManifestAnalysisResult::from_root(EntityRoot::Var(
+                    Var::Principal,
+                )))
+            } else {
+                assert!(slot_id.is_resource());
+                Ok(EntityManifestAnalysisResult::from_root(EntityRoot::Var(
+                    Var::Resource,
+                )))
+            }
+        }
+        ExprKind::Var(var) => Ok(EntityManifestAnalysisResult::from_root(EntityRoot::Var(
+            *var,
+        ))),
+        ExprKind::GetAttr { expr, attr } => {
+            Ok(entity_manifest_from_expr(expr, policy_id)?.get_attr(attr))
+        }
+        ExprKind::Lit(Literal::EntityUID(literal)) => Ok(EntityManifestAnalysisResult::from_root(
+            EntityRoot::Literal(**literal),
+        )),
+        ExprKind::Unknown(_) => Err(PartialExpressionError {})?,
+
+        // Non-entity literals need no fields to be loaded.
+        ExprKind::Lit(_) => Ok(EntityManifestAnalysisResult::default()),
         ExprKind::Unknown(_) => Err(PartialExpressionError {})?,
         ExprKind::If {
             test_expr,
             then_expr,
             else_expr,
-        } => {
-            add_to_root_trie(root_trie, test_expr, policy_id, should_load_all)?;
-            add_to_root_trie(root_trie, then_expr, policy_id, should_load_all)?;
-            add_to_root_trie(root_trie, else_expr, policy_id, should_load_all)?;
-            Ok(())
-        }
-        ExprKind::And { left, right } => {
-            add_to_root_trie(root_trie, left, policy_id, should_load_all)?;
-            add_to_root_trie(root_trie, right, policy_id, should_load_all)?;
-            Ok(())
-        }
-        ExprKind::Or { left, right } => {
-            add_to_root_trie(root_trie, left, policy_id, should_load_all)?;
-            add_to_root_trie(root_trie, right, policy_id, should_load_all)?;
-            Ok(())
+        } => Ok(entity_manifest_from_expr(test_expr, policy_id)?
+            .drop_value()
+            .union(&entity_manifest_from_expr(then_expr, policy_id)?)
+            .union(&entity_manifest_from_expr(else_expr, policy_id)?)),
+        ExprKind::And { left, right } | ExprKind::Or { left, right } => {
+            Ok(entity_manifest_from_expr(left, policy_id)?
+                .drop_value()
+                .union(&entity_manifest_from_expr(right, policy_id)?))
         }
         ExprKind::UnaryApp { op, arg } => {
             match op {
-                UnaryOp::Not => add_to_root_trie(root_trie, arg, policy_id, should_load_all)?,
-                UnaryOp::Neg => add_to_root_trie(root_trie, arg, policy_id, should_load_all)?,
-            };
-            Ok(())
+                // both unary ops are on booleans, so they are simple
+                UnaryOp::Not | UnaryOp::Neg => {
+                    Ok(entity_manifest_from_expr(arg, policy_id)?.drop_value())
+                }
+            }
         }
         ExprKind::BinaryApp { op, arg1, arg2 } => match op {
             // Special case! Equality between records requires
             // that we load all fields.
             // This could be made more precise if we check the type.
             BinaryOp::Eq => {
-                add_to_root_trie(root_trie, arg1, policy_id, true)?;
-                add_to_root_trie(root_trie, arg2, policy_id, true)?;
-                Ok(())
+                let union_res = entity_manifest_from_expr(arg1, policy_id)?
+                    .union(&entity_manifest_from_expr(arg2, policy_id)?);
+                match arg1.data().unwrap() {
+                    Type::EntityOrRecord(
+                        EntityRecordKind::ActionEntity { attrs, .. }
+                        | EntityRecordKind::Record { attrs, .. },
+                    ) => {
+                        let leaf_trie = type_to_access_trie(
+                            arg1.data()
+                                .as_ref()
+                                .expect("Typechecked expression missing type"),
+                        );
+
+                        Ok(union_res.restore_global_trie_invariant(&leaf_trie).drop_value())
+                    }
+                    _ => Ok(union_res),
+                }
             }
             BinaryOp::In => {
                 // Recur normally on the rhs

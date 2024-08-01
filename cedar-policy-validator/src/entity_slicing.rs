@@ -28,7 +28,7 @@ use smol_str::SmolStr;
 use thiserror::Error;
 
 use crate::entity_manifest::{
-    AccessTrie, EntityManifest, EntityRoot, PartialRequestError, RootAccessTrie,
+    AccessTrie, EntityManifest, EntityManifestAnalysisResult, EntityRoot, PartialRequestError,
 };
 
 /// An error generated when attempting to slice a partial entity.
@@ -72,7 +72,7 @@ impl<T: Clone> EntityManifest<T> {
     }
 }
 
-impl<T: Clone> RootAccessTrie<T> {
+impl<T: Clone> EntityManifestAnalysisResult<T> {
     /// Given entities and a request, return a new entitity store
     /// which is a slice of the old one.
     fn slice(&self, entities: &Entities, request: &Request) -> Result<Entities, EntitySliceError> {

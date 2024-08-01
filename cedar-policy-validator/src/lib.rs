@@ -37,6 +37,7 @@ use std::collections::HashSet;
 
 pub mod entity_manifest;
 pub mod entity_slicing;
+mod entity_manifest_analysis;
 mod err;
 pub use err::*;
 mod coreschema;
