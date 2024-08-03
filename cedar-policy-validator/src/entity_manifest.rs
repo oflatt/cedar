@@ -244,11 +244,7 @@ fn union_fields<T: Clone>(first: &Fields<T>, second: &Fields<T>) -> Fields<T> {
 impl AccessPath {
     /// Convert a [`AccessPath`] into corresponding [`RootAccessTrie`].
     pub fn to_root_access_trie(&self) -> RootAccessTrie {
-        self.to_root_access_trie_with_leaf(AccessTrie {
-            ancestors_required: true,
-            children: Default::default(),
-            data: (),
-        })
+        self.to_root_access_trie_with_leaf(AccessTrie::default())
     }
 
     /// Convert an [`AccessPath`] to a [`RootAccessTrie`], and also
@@ -322,6 +318,12 @@ impl AccessTrie {
             ancestors_required: false,
             data: (),
         }
+    }
+}
+
+impl Default for AccessTrie {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
