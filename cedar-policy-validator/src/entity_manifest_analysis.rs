@@ -151,12 +151,12 @@ impl WrappedAccessPaths {
     /// paths for this path record.
     fn ancestors_required(&mut self, ty: &Type) {
         match self {
-            WrappedAccessPaths::AccessPath(path) => match ty {
-                Type::EntityOrRecord(EntityRecordKind::Entity { .. }) => {
+            WrappedAccessPaths::AccessPath(path) => {
+                if let Type::EntityOrRecord(EntityRecordKind::Entity { .. }) = ty {
+                    eprintln!("here");
                     path.ancestors_required = true;
                 }
-                _ => {}
-            },
+            }
             WrappedAccessPaths::RecordLiteral(record) => match ty {
                 Type::EntityOrRecord(EntityRecordKind::Record { attrs, .. }) => {
                     for (field, value) in record.iter_mut() {

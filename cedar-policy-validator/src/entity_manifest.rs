@@ -252,18 +252,32 @@ impl AccessPath {
     pub(crate) fn to_root_access_trie_with_leaf(&self, leaf_trie: AccessTrie) -> RootAccessTrie {
         let mut current = leaf_trie;
         // reverse the path, visiting the last access first
-        for field in self.path.iter().rev() {
+        for (index, field) in self.path.iter().rev().enumerate() {
             let mut fields = HashMap::new();
             fields.insert(field.clone(), Box::new(current));
+
+            // the first time we build an access trie is the leaf
+            // of the path, so set the `ancestors_required` flag
+            let ancestors_required = if index == 0 {
+                self.ancestors_required
+            } else {
+                false
+            };
+
             current = AccessTrie {
-                ancestors_required: false,
+                ancestors_required,
                 children: fields,
                 data: (),
             };
         }
 
         let mut primary_map = HashMap::new();
-        primary_map.insert(self.root.clone(), current);
+
+        // special case: if the path is empty and ancestors not required,
+        // no need to insert anything
+        if current != AccessTrie::new() {
+            primary_map.insert(self.root.clone(), current);
+        }
         RootAccessTrie { trie: primary_map }
     }
 }
@@ -478,6 +492,9 @@ fn entity_manifest_from_expr(
             match op {
                 BinaryOp::ContainsAll | BinaryOp::ContainsAny | BinaryOp::Contains => {
                     arg2_res = arg2_res.ancestors_required(ty2);
+                }
+                BinaryOp::In => {
+                    arg1_res = arg1_res.ancestors_required(ty1);
                 }
                 _ => (),
             }
@@ -1000,6 +1017,7 @@ action Read appliesTo {
   ]
 }"#;
         let expected_manifest = serde_json::from_str(expected).unwrap();
+        eprintln!("Got: {}", serde_json::to_string(&entity_manifest).unwrap());
         assert_eq!(entity_manifest, expected_manifest);
 
         let entities_json = serde_json::json!(
