@@ -1189,4 +1189,36 @@ action Read appliesTo {
             &manifest,
         );
     }
+
+    // test the getTag function on a literal string
+    fn test_slice_gettag_simple() {
+        let schema = ValidatorSchema::from_cedarschema_str(
+            "
+entity User = {
+  foo: String,
+  bar: String,
+} tags String;",
+            Extensions::all_available(),
+        )
+        .unwrap()
+        .0;
+        let entities_json = serde_json::json!([{
+            "uid" : { "type" : "User", "id" : "oliver"},
+            "parents": [],
+            "attrs": {
+                "foo": "1",
+                "bar": "1",
+            },
+            "tags": {
+                "doc1": "1",
+                "doc2": "2",
+            }
+        }]);
+        let validator = Validator::new(schema);
+        let pset = parser::parse_policyset(
+            r#"permit(principal, action, resource) when { principal.foo == "1" };"#,
+        )
+        .unwrap();
+        let manifest = compute_entity_manifest(&validator, &pset).unwrap();
+    }
 }
